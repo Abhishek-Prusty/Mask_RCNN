@@ -8,7 +8,7 @@ Written by Waleed Abdulla
 
 ------------------------------------------------------------
 
-#	python3 balloon.py train --dataset=/home/sowmya.aitha/prusty/Mask_RCNN/ --weights=coco
+python3 balloon.py train --dataset=/home/sowmya.aitha/prusty/Mask_RCNN/ --weights=coco
 
 
 Usage: import the module (see Jupyter notebooks for examples), or run from
@@ -55,7 +55,7 @@ DEFAULT_LOGS_DIR = os.path.join(ROOT_DIR, "logs")
 ############################################################
 #  Configurations
 ############################################################
-
+EPOCH=300
 
 class BalloonConfig(Config):
 	"""Configuration for training on the toy  dataset.
@@ -69,14 +69,14 @@ class BalloonConfig(Config):
 	IMAGES_PER_GPU = 1
 
 	# Number of classes (including background)
-	NUM_CLASSES = 10  # Background + balloon
+	NUM_CLASSES = 11  # Background + balloon
 
 	# Number of training steps per epoch
-	STEPS_PER_EPOCH = 50
-	USE_MINI_MASK = True
+	STEPS_PER_EPOCH = 500
+	USE_MINI_MASK = False
 
 	# Skip detections with < 80% confidence
-	DETECTION_MIN_CONFIDENCE = 0.9
+	DETECTION_MIN_CONFIDENCE = 0.8
 
 
 ############################################################
@@ -92,15 +92,17 @@ class BalloonDataset(utils.Dataset):
 		"""
 		# Add classes. We have only one class to add.
 		classes = ['Hole(Virtual)','Hole(Physical)','Character Line Segment','Physical Degradation','Page Boundary','Character Component','Picture','Decorator','Library Marker']
-		self.add_class("object", 1, "hole")
-		self.add_class("object", 2, "hole-P")
+		self.add_class("object", 1, "H-V")
+		self.add_class("object", 2, "H")
 		self.add_class("object", 3, "CLS")
-		self.add_class("object", 4, "P-degra")
-		self.add_class("object", 5, "Page bound")
-		self.add_class("object", 6, "char")
-		self.add_class("object", 7, "picure")
-		self.add_class("object", 8, "decorator")
-		self.add_class("object", 9, "lib")
+		self.add_class("object", 4, "PD")
+		self.add_class("object", 5, "PB")
+		self.add_class("object", 6, "CC")
+		self.add_class("object", 7, "P")
+		self.add_class("object", 8, "D")
+		self.add_class("object", 9, "LM")
+		self.add_class("object", 10, "BL")
+
 		# Train or validation dataset?
 		assert subset in ["train", "val"]
 		dataset_dir = os.path.join(dataset_dir, subset)
@@ -166,36 +168,46 @@ class BalloonDataset(utils.Dataset):
 
 				if(obj['Spatial Annotation']=='Library Marker'):
 					class_ids.append(9)
+				if(obj['Spatial Annotation']=='Boundary Line'):
+					class_ids.append(10)
 
 
 			# load_mask() needs the image size to convert polygons to masks.
 			# Unfortunately, VIA doesn't include it in JSON, so we must read
 			# the image. This is only managable since the dataset is tiny.
 
-			image_path = os.path.join(dataset_dir, a['filename'])
-			image_pa = image_path.split("/")
-			image_path = "/home/sowmya.aitha/prusty/bhoomi_images/"
-			flag=0
-			for ppp in image_pa:
-				if(ppp=="images"):
-					flag=1
-				if(flag==1):
-					image_path=os.path.join(image_path,ppp)
-			image_path=image_path.replace("%20"," " )
-			image_path=image_path.replace("&","" )
+			ff=a['filename'].split('/')[-2:]             #print(ff)
+			if(ff[0]=='illustrations'):
+ 
+				ff1=ff[0]+'/'+ff[1]
+				image_path ='/home/sowmya.aitha/prusty/'+ff1
+ 
+			else:
+				image_path=os.path.join(dataset_dir,a['filename'])
+				image_pa = image_path.split("/")
+				image_path = "/home/sowmya.aitha/prusty/bhoomi_images/"
+				flag=0
+				for ppp in image_pa:
+				 if(ppp=="images"):
+					 flag=1
+				 if(flag==1):
+					 image_path=os.path.join(image_path,ppp)
+				image_path=image_path.replace("%20"," " )
+				image_path=image_path.replace("&","" )
+			 #print(image_path)
 			try:
-				image = skimage.io.imread(image_path)
+			 	image = skimage.io.imread(image_path)
 			except Exception:
-				continue
+			 	continue
 			height, width = image.shape[:2]
 
 			self.add_image(
-				"object",
-				image_id=a['filename'],  # use file name as a unique image id
-				path=image_path,
-				width=width, height=height,
-				polygons=polygons,
-				num_ids=class_ids)
+			 "object",
+			 image_id=a['filename'],  # use file name as a unique image id
+			 path=image_path,
+			 width=width, height=height,
+			 polygons=polygons,
+			 num_ids=class_ids)
 
 
 	def load_mask(self, image_id):
@@ -218,7 +230,10 @@ class BalloonDataset(utils.Dataset):
 						dtype=np.uint8)
 		for i, p in enumerate(info["polygons"]):
 			# Get indexes of pixels inside the polygon and set them to 1
-			rr, cc = skimage.draw.polygon(p['all_points_y'], p['all_points_x'])
+			try:
+				rr, cc = skimage.draw.polygon(p['all_points_y'], p['all_points_x'])
+			except Exception:
+				continue
 			try:
 				mask[rr, cc, i] = 1
 			except Exception:
@@ -257,8 +272,13 @@ def train(model):
 	print("Training network heads")
 	model.train(dataset_train, dataset_val,
 				learning_rate=config.LEARNING_RATE,
-				epochs=30,
+				epochs=15,
 				layers='heads')
+	print("Training whole network")
+	model.train(dataset_train, dataset_val,
+				learning_rate=config.LEARNING_RATE/10,
+				epochs=EPOCH,
+				layers='all')
 
 
 def color_splash(image, mask):
